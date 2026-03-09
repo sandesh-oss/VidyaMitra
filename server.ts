@@ -29,7 +29,19 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  connectionTimeout: 5000,
+  socketTimeout: 5000,
 });
+
+// Helper to send email with timeout
+const sendEmailWithTimeout = (mailOptions: any, timeoutMs = 8000) => {
+  return Promise.race([
+    transporter.sendMail(mailOptions),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Email send timeout")), timeoutMs)
+    ),
+  ]);
+};
 
 // Database Setup
 const db = new Database("vidyamitra.db");
@@ -155,33 +167,51 @@ app.post("/api/auth/send-otp", async (req, res) => {
     
     // Send Email
     if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-      await transporter.sendMail({
-        from: process.env.SMTP_FROM || '"VidyāMitra" <noreply@vidyamitra.ai>',
-        to: email,
-        subject: "VidyāMitra - Your Verification Code",
-        html: `
-          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
-            <h2 style="color: #10b981; text-align: center;">VidyāMitra</h2>
-            <p>Hello,</p>
-            <p>Thank you for joining VidyāMitra. Use the following code to verify your email address:</p>
-            <div style="background: #f8fafc; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 10px; color: #0f172a; border-radius: 8px; margin: 20px 0;">
-              ${otp}
+      try {
+        await sendEmailWithTimeout({
+          from: process.env.SMTP_FROM || '"VidyāMitra" <noreply@vidyamitra.ai>',
+          to: email,
+          subject: "VidyāMitra - Your Verification Code",
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
+              <h2 style="color: #10b981; text-align: center;">VidyāMitra</h2>
+              <p>Hello,</p>
+              <p>Thank you for joining VidyāMitra. Use the following code to verify your email address:</p>
+              <div style="background: #f8fafc; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 10px; color: #0f172a; border-radius: 8px; margin: 20px 0;">
+                ${otp}
+              </div>
+              <p style="color: #64748b; font-size: 14px;">This code will expire in 10 minutes. If you didn't request this, please ignore this email.</p>
+              <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+              <p style="color: #94a3b8; font-size: 12px; text-align: center;">&copy; 2026 VidyāMitra AI Career Agent</p>
             </div>
-            <p style="color: #64748b; font-size: 14px;">This code will expire in 10 minutes. If you didn't request this, please ignore this email.</p>
-            <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
-            <p style="color: #94a3b8; font-size: 12px; text-align: center;">&copy; 2026 VidyāMitra AI Career Agent</p>
-          </div>
-        `,
-      });
-      res.json({ success: true, message: "OTP sent to your email." });
+          `,
+        });
+        console.log(`[DEBUG] OTP sent to ${email}: ${otp}`);
+        res.json({ success: true, message: "OTP sent to your email." });
+      } catch (emailError: any) {
+        console.error("[ERROR] Email sending failed:", emailError.message);
+        // For development/testing: return success anyway since OTP is saved
+        if (process.env.NODE_ENV === "development") {
+          console.log(`[TEST MODE] OTP for ${email}: ${otp}`);
+          res.json({ success: true, message: "OTP sent to your email (test mode)." });
+        } else {
+          res.status(500).json({ error: "Failed to send verification email. Please try again." });
+        }
+      }
     } else {
-      // In production, we must have SMTP configured
+      // SMTP not configured
       console.error("[CRITICAL] SMTP not configured. Cannot send OTP.");
-      res.status(500).json({ error: "Email service is temporarily unavailable. Please contact support." });
+      // For development: return success with test OTP
+      if (process.env.NODE_ENV === "development") {
+        console.log(`[TEST MODE] OTP for ${email}: ${otp}`);
+        res.json({ success: true, message: "OTP generated (test mode, check server logs)." });
+      } else {
+        res.status(500).json({ error: "Email service is not configured. Please contact support." });
+      }
     }
   } catch (error: any) {
-    console.error("Email error:", error);
-    res.status(500).json({ error: "Failed to send verification email" });
+    console.error("OTP generation error:", error);
+    res.status(500).json({ error: "Failed to process request" });
   }
 });
 
