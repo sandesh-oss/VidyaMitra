@@ -1,0 +1,7 @@
+{
+  "name": "VidyāMitra: Intelligent Career Agent",
+  "description": "An AI-powered career guidance platform featuring resume evaluation, skill gap analysis, training planning, and mock interviews.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
